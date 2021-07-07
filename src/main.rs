@@ -4,10 +4,10 @@ First, we need to define a graph and test it.
  */
 
 mod graphs {
+    use nalgebra::DMatrix;
     use rand::prelude::*;
     use std::cmp::PartialEq;
-    use std::collections::HashMap;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     #[derive(PartialEq, Clone, Copy, Debug, Hash, Eq)]
     pub struct Node {
@@ -108,6 +108,18 @@ mod graphs {
             }
             return Graph::from_edge_list(edge_list);
         }
+
+        pub fn adjacency_matrix(&self) -> DMatrix<u64> {
+            let number_of_nodes = self.nodes.len() as u64;
+            let vector_size = self.nodes.len() * self.nodes.len();
+            let mut adj_list = vec![0u64; vector_size];
+            for edge in self.edges.iter() {
+                adj_list[(edge.from.id * number_of_nodes + edge.to.id) as usize] += 1;
+            }
+            let adjacency_matrix = DMatrix::from_vec(self.nodes.len(), self.nodes.len(), adj_list);
+            return adjacency_matrix;
+        }
+
         pub fn average_node_degree(&self) -> f64 {
             let mut counter: HashMap<Node, u64> = HashMap::new();
             for edge in self.edges.iter() {
