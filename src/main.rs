@@ -8,6 +8,7 @@ mod graphs {
     use rand::prelude::*;
     use std::cmp::PartialEq;
     use std::collections::{HashMap, HashSet};
+    use std::ops::AddAssign;
 
     #[derive(PartialEq, Clone, Copy, Debug, Hash, Eq)]
     pub struct Node {
@@ -20,12 +21,27 @@ mod graphs {
         to: Node,
     }
 
+    impl Edge {
+        pub fn new_from_u64(from: u64, to: u64) -> Edge {
+            Edge {
+                from: Node { id: from },
+                to: Node { id: to },
+            }
+        }
+
+        pub fn new_from_nodes(from: Node, to: Node) -> Edge {
+            Edge { from, to }
+        }
+    }
+
+    /// A graph is designed here as a set of edges and a vector of nodes.
     pub struct Graph {
         pub nodes: Vec<Node>,
         pub edges: HashSet<Edge>,
     }
 
     impl Graph {
+        /// Creates a graph from a given edge list.
         pub fn from_edge_list(edge_list: HashSet<Edge>) -> Graph {
             let mut node_list: Vec<Node> = Vec::new();
             for edge in edge_list.iter() {
@@ -42,35 +58,32 @@ mod graphs {
             };
         }
 
-        pub fn erdos_renyi_graph(number_of_nodes: u64, prob: f64) -> Graph {
-            let node_list = (0u64..number_of_nodes)
-                .map(|x| Node { id: x })
-                .collect::<Vec<_>>();
+        /// Generates aa random graph according to the Erdos-Renyi distribution.
+        /// The graph is undirected, with n nodes and p probability of an edge between any two nodes.
+        pub fn erdos_renyi_graph(n: u64, p: f64) -> Graph {
+            let node_list = (0u64..n).map(|x| Node { id: x }).collect::<Vec<_>>();
             let mut edge_list: HashSet<Edge> = HashSet::new();
             for (n1, n2) in node_list
                 .iter()
                 .flat_map(|y| node_list.clone().into_iter().map(move |x| (x, y)))
             {
                 let u: f64 = random();
-                if u <= prob {
+                if u <= p {
                     edge_list.insert(Edge { to: *n2, from: n1 });
                 }
             }
             return Graph::from_edge_list(edge_list);
         }
 
-        pub fn small_word_graph(
-            number_of_nodes: u64,
-            mut avg_node_degree: i64,
-            prob: f64,
-        ) -> Graph {
-            let node_list = (0u64..number_of_nodes)
-                .map(|x| Node { id: x })
-                .collect::<Vec<_>>();
-            if avg_node_degree.rem_euclid(2) != 0 {
-                avg_node_degree += 1
+        /// Generates a small word graph, based on the paper by Watts and Strogatz.
+        /// The graph is undirected, with n nodes and p as the probability of an edge between any two nodes.
+        /// The average node degree is given by k.
+        pub fn small_word_graph(n: u64, mut k: i64, p: f64) -> Graph {
+            let node_list = (0u64..n).map(|x| Node { id: x }).collect::<Vec<_>>();
+            if k.rem_euclid(2) != 0 {
+                k += 1
             }
-            let neighbor_indices = (-avg_node_degree / 2..avg_node_degree / 2).collect::<Vec<_>>();
+            let neighbor_indices = (-k / 2..k / 2).collect::<Vec<_>>();
             let mut edge_list: HashSet<Edge> = HashSet::new();
             let mut rng = rand::thread_rng();
             for (n1, n2) in node_list.iter().flat_map(|y| {
@@ -82,20 +95,20 @@ mod graphs {
                             } else if (x.abs() as u64) < y.id {
                                 y.id - (x.abs() as u64)
                             } else {
-                                number_of_nodes - y.id - (x.abs() as u64)
+                                n - y.id - (x.abs() as u64)
                             })
-                            .rem_euclid(number_of_nodes),
+                            .rem_euclid(n),
                         },
                         y,
                     )
                 })
             }) {
                 let u: f64 = random();
-                if u <= prob {
+                if u <= p {
                     edge_list.insert(Edge { to: *n2, from: n1 });
                 } else {
                     let mut random_node = Node {
-                        id: rng.gen_range(0u64..number_of_nodes),
+                        id: rng.gen_range(0u64..n),
                     };
                     if random_node.id == n1.id {
                         random_node.id += 1
@@ -109,17 +122,31 @@ mod graphs {
             return Graph::from_edge_list(edge_list);
         }
 
-        pub fn adjacency_matrix(&self) -> DMatrix<u64> {
+        /// Returns the adjacency matrix of the graph.
+        pub fn adjacency_matrix<
+            T: 'static
+                + std::marker::Copy
+                + std::fmt::Debug
+                + PartialEq
+                + num_traits::One
+                + num_traits::Zero
+                + AddAssign,
+        >(
+            &self,
+        ) -> DMatrix<T> {
             let number_of_nodes = self.nodes.len() as u64;
             let vector_size = self.nodes.len() * self.nodes.len();
-            let mut adj_list = vec![0u64; vector_size];
+            let mut adj_list = vec![T::zero(); vector_size];
             for edge in self.edges.iter() {
-                adj_list[(edge.from.id * number_of_nodes + edge.to.id) as usize] += 1;
+                adj_list[(edge.from.id * number_of_nodes + edge.to.id) as usize] += T::one();
             }
-            let adjacency_matrix = DMatrix::from_vec(self.nodes.len(), self.nodes.len(), adj_list);
+            let adjacency_matrix =
+                DMatrix::<T>::from_vec(self.nodes.len(), self.nodes.len(), adj_list);
+            // let adjacency_matrix = (adjacency_matrix + adjacency_matrix.transpose()) / (T::one() + T::one());
             return adjacency_matrix;
         }
 
+        /// Calculates the average node degree of the graph.
         pub fn average_node_degree(&self) -> f64 {
             let mut counter: HashMap<Node, u64> = HashMap::new();
             for edge in self.edges.iter() {
@@ -130,12 +157,28 @@ mod graphs {
             }
             return (counter.values().sum::<u64>() as f64) / (counter.keys().len() as f64);
         }
+
+        /// Calculates the Katz index, which is a measure of the centrality of a node.
+        /// It calculates the number of paths between two nodes, u and v.
+        /// We add a discount factor, beta, which reduces the weight of longer paths.
+        pub fn katz_index_matrix(&self, beta: f64) -> DMatrix<f64> {
+            let adjacency_matrix = self.adjacency_matrix();
+            let identity_matrix =
+                DMatrix::<f64>::identity(adjacency_matrix.nrows(), adjacency_matrix.ncols());
+            let katz_matrix = (identity_matrix.clone() - beta * adjacency_matrix)
+                .try_inverse()
+                .unwrap()
+                - identity_matrix;
+            katz_matrix
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::graphs::Graph;
+    use crate::graphs::{Edge, Graph};
+    use nalgebra::matrix;
+    use std::collections::HashSet;
 
     #[test]
     fn number_of_nodes_er_is_correct() {
@@ -148,6 +191,33 @@ mod tests {
         let n = 30;
         let graph = Graph::small_word_graph(n, 2, 0.7);
         assert_eq!(n as usize, graph.nodes.len());
+    }
+    #[test]
+    fn graph_from_edge_list_is_correct() {
+        let edge_list: HashSet<Edge> = vec![
+            Edge::new_from_u64(1, 2),
+            Edge::new_from_u64(0, 2),
+            Edge::new_from_u64(1, 3),
+            Edge::new_from_u64(2, 3),
+        ]
+        .into_iter()
+        .collect();
+        let graph = Graph::from_edge_list(edge_list);
+        assert_eq!(graph.edges.len(), 4);
+    }
+    #[test]
+    fn graph_adjacency_matrix_is_correct() {
+        let edge_list: HashSet<Edge> = vec![
+            Edge::new_from_u64(1, 2),
+            Edge::new_from_u64(0, 2),
+            Edge::new_from_u64(1, 3),
+            Edge::new_from_u64(2, 3),
+        ]
+        .into_iter()
+        .collect();
+        let graph = Graph::from_edge_list(edge_list);
+        let adj_matrix = graph.adjacency_matrix::<u32>();
+        let correct_adj_matrix = matrix![0, 0, 1, 0; 0, 0, 1, 1; 0, 0, 0, 1; 0, 0, 0, 0];
     }
 }
 
