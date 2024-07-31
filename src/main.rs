@@ -122,6 +122,21 @@ mod graphs {
             return Graph::from_edge_list(edge_list);
         }
 
+        /// Generate a complete graph with n nodes.
+        pub fn complete_graph(n: u64) -> Graph {
+            let node_list = (0u64..n).map(|x| Node { id: x }).collect::<Vec<_>>();
+            let edge_list: HashSet<Edge> = node_list
+                .iter()
+                .flat_map(|y| {
+                    node_list
+                        .clone()
+                        .into_iter()
+                        .map(move |x| Edge::new_from_nodes(*y, x))
+                })
+                .collect();
+            return Graph::from_edge_list(edge_list);
+        }
+
         /// Returns the adjacency matrix of the graph.
         pub fn adjacency_matrix<
             T: 'static
